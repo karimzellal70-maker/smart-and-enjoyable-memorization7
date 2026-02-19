@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI VoiceMaster Pro - النسخة الذكية</title>
+    <style>
+        /* (أبقِ الـ CSS الأصلي الذي أرسلته كما هو، سأضيف فقط بعض اللمسات للتشغيل) */
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap');
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Cairo', sans-serif; }
+        :root {
+            --primary: #6d28d9; --secondary: #4f46e5; --accent: #ec4899;
+            --success: #10b981; --warning: #f59e0b; --danger: #ef4444;
+            --dark: #0f172a; --light: #f8fafc; --gradient: linear-gradient(135deg, var(--primary), var(--accent));
+            --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); --glow: 0 0 30px rgba(109, 40, 217, 0.5);
+        }
+        body { background: var(--dark); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; overflow-x: hidden; }
+
+        .ai-background { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 0; }
+        .ai-particle { position: absolute; background: rgba(255, 255, 255, 0.2); border-radius: 50%; pointer-events: none; }
+
+        .app-container { position: relative; z-index: 10; width: 100%; max-width: 900px; background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(20px); border-radius: 40px; padding: 30px; border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: var(--shadow); }
+
+        .ai-page { display: none; animation: pageEnter 0.5s ease; }
+        .ai-page.active { display: block; }
+
+        @keyframes pageEnter { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ميكروفون متحرك */
+        .ai-mic-button { width: 150px; height: 150px; border-radius: 50%; background: var(--gradient); border: none; color: white; font-size: 50px; cursor: pointer; margin: 0 auto; display: flex; align-items: center; justify-content: center; position: relative; transition: 0.3s; }
+        .recording { animation: pulse 1.5s infinite; background: var(--danger) !important; }
+        
+        /* إشعار Toast */
+        .ai-toast { position: fixed; bottom: 20px; right: 20px; background: var(--gradient); color: white; padding: 15px 25px; border-radius: 15px; transform: translateX(150%); transition: 0.5s; z-index: 1000; }
+        .ai-toast.show { transform: translateX(0); }
+
+        /* تنسيق النصوص المستخرجة */
+        .ai-text-box { background: rgba(0,0,0,0.2); padding: 20px; border-radius: 15px; color: white; min-height: 100px; border: 1px solid var(--primary); margin: 20px 0; }
+    </style>
+</head>
+<body>
+
+    <div class="ai-background" id="particles-container"></div>
+
+    <div class="app-container">
+        <header style="text-align: center; color: white; margin-bottom: 30px;">
+            <h1 style="font-weight: 900; letter-spacing: -1px;">AI VoiceMaster <span style="color: var(--accent);">Pro</span></h1>
+            <p style="opacity: 0.7;">نظام تحويل الصوت إلى نص بمعالجة ذكية</p>
+        </header>
+
+        <div id="page1" class="ai-page active">
+            <div style="text-align: center;">
+                <button id="micBtn" class="ai-mic-button">🎤</button>
+                <p id="statusLabel" style="color: white; margin-top: 20px; font-weight: 600;">اضغط للبدء في التحدث</p>
+            </div>
+            <div id="liveResult" class="ai-text-box" style="font-size: 1.2rem; text-align: center;">
+                النص سيظهر هنا مباشرة...
+            </div>
+        </div>
+
+        <div id="page2" class="ai-page">
+            <h3 style="color: white; margin-bottom: 15px;">المسودة المستخرجة:</h3>
+            <textarea id="finalText" class="ai-text-box" style="width: 100%; height: 200px; outline: none; resize: none;"></textarea>
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <button onclick="copyText()" style="background: var(--success); border:none; padding: 12px 25px; color: white; border-radius: 10px; cursor: pointer;">نسخ النص</button>
+                <button onclick="goToPage(1)" style="background: var(--secondary); border:none; padding: 12px 25px; color: white; border-radius: 10px; cursor: pointer;">إعادة المحاولة</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="ai-toast">تم النسخ بنجاح!</div>
+
+    <script>
+        // === 1. إعداد الخلفية المتحركة (جزيئات) ===
+        const particlesContainer = document.getElementById('particles-container');
+        for (let i = 0; i < 50; i++) {
+            const particle = document.createElement('div');
+            particle.className = 'ai-particle';
+            const size = Math.random() * 3 + 'px';
+            particle.style.width = size;
+            particle.style.height = size;
+            particle.style.top = Math.random() * 100 + 'vh';
+            particle.style.left = Math.random() * 100 + 'vw';
+            particle.style.animation = `float ${Math.random() * 10 + 10}s infinite linear`;
+            particlesContainer.appendChild(particle);
+        }
+
+        // === 2. منطق التعرف على الصوت (Web Speech API) ===
+        const micBtn = document.getElementById('micBtn');
+        const statusLabel = document.getElementById('statusLabel');
+        const liveResult = document.getElementById('liveResult');
+        const finalText = document.getElementById('finalText');
+        
+        let isRecording = false;
+        let recognition;
+
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'ar-SA';
+
+            recognition.onstart = () => {
+                isRecording = true;
+                micBtn.classList.add('recording');
+                statusLabel.innerText = "أنا أسمعك الآن... تكلم";
+                statusLabel.style.color = "var(--accent)";
+            };
+
+            recognition.onresult = (event) => {
+                let interimTranscript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalText.value += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+                liveResult.innerText = interimTranscript || "جاري المعالجة...";
+            };
+
+            recognition.onerror = (event) => {
+                showToast("خطأ في الميكروفون: " + event.error);
+                stopRecording();
+            };
+
+            recognition.onend = () => {
+                stopRecording();
+            };
+        } else {
+            showToast("متصفحك لا يدعم التعرف على الصوت");
+        }
+
+        function toggleRecording() {
+            if (isRecording) {
+                stopRecording();
+                goToPage(2);
+            } else {
+                liveResult.innerText = "";
+                finalText.value = "";
+                recognition.start();
+            }
+        }
+
+        function stopRecording() {
+            isRecording = false;
+            recognition.stop();
+            micBtn.classList.remove('recording');
+            statusLabel.innerText = "اضغط للبدء في التحدث";
+            statusLabel.style.color = "white";
+        }
+
+        micBtn.addEventListener('click', toggleRecording);
+
+        // === 3. نظام التنقل والوظائف الإضافية ===
+        function goToPage(pageNumber) {
+            document.querySelectorAll('.ai-page').forEach(p => p.classList.remove('active'));
+            document.getElementById('page' + pageNumber).classList.add('active');
+        }
+
+        function copyText() {
+            finalText.select();
+            document.execCommand('copy');
+            showToast("تم نسخ النص إلى الحافظة!");
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.innerText = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+    </script>
+</body>
+</html>
